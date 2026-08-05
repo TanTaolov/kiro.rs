@@ -1,18 +1,6 @@
 name: Build Artifacts
 
 on:
-  push:
-    branches:
-      - master
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - '.gitignore'
-      - '.gitattributes'
-      - 'LICENSE'
-      - 'config.example.json'
-      - '.vscode/**'
-      - '.idea/**'
   workflow_dispatch:
     inputs:
       version:
@@ -24,28 +12,7 @@ permissions:
   contents: read
 
 jobs:
-  pre-check:
-    runs-on: ubuntu-latest
-    outputs:
-      should_build: ${{ steps.check.outputs.should_build }}
-    steps:
-      - uses: actions/checkout@v4
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/')
-        with:
-          fetch-depth: 0
-      - name: Check if commit has release tag
-        id: check
-        run: |
-          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == refs/heads/* ]] && git tag --points-at HEAD | grep -q '^v'; then
-            echo "should_build=false" >> $GITHUB_OUTPUT
-            echo "::notice::Skipping beta build: commit already has a release tag"
-          else
-            echo "should_build=true" >> $GITHUB_OUTPUT
-          fi
-
   build-frontend:
-    needs: pre-check
-    if: needs.pre-check.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -81,10 +48,7 @@ jobs:
           retention-days: 1
 
   build:
-    needs:
-      - pre-check
-      - build-frontend
-    if: needs.pre-check.outputs.should_build == 'true'
+    needs: build-frontend
     strategy:
       fail-fast: false
       matrix:
@@ -120,14 +84,10 @@ jobs:
       - name: Determine version
         id: version
         shell: bash
+        env:
+          RAW_VERSION: ${{ inputs.version }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            RAW_VERSION="${{ github.event.inputs.version }}"
-            echo "version=${RAW_VERSION#v}" >> $GITHUB_OUTPUT
-          else
-            SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-6)
-            echo "version=beta-${SHORT_SHA}" >> $GITHUB_OUTPUT
-          fi
+          echo "version=${RAW_VERSION#v}" >> $GITHUB_OUTPUT
 
       - name: Download admin-ui dist
         uses: actions/download-artifact@v4
