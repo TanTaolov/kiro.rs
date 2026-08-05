@@ -197,6 +197,11 @@ pub struct AddCredentialRequest {
     /// 账号来源渠道（纯备注，可选）
     #[serde(default)]
     pub source_channel: Option<String>,
+
+    /// 凭据添加（创建）时间（RFC3339 格式，可选）
+    /// 导入时携带原始创建时间，新建时留空由后端自动生成
+    #[serde(default)]
+    pub created_at: Option<String>,
 }
 
 fn default_auth_method() -> String {
@@ -867,7 +872,7 @@ pub struct CreateClientKeyRequest {
     pub group: Option<String>,
 }
 
-/// 创建客户端 Key 响应（明文 Key 仅在此处返回一次）
+/// 创建客户端 Key 响应（返回新生成的明文 Key）
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateClientKeyResponse {
@@ -875,6 +880,18 @@ pub struct CreateClientKeyResponse {
     pub key: String,
     pub name: String,
     pub created_at: String,
+}
+
+/// 查看客户端 Key 明文响应
+///
+/// 明文以原值存放在 `client_api_keys.json`，此接口把它回读给已通过 Admin 鉴权的
+/// 调用方，供管理端「复制明文」使用；响应禁止缓存。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevealClientKeyResponse {
+    pub id: u64,
+    pub key: String,
+    pub name: String,
 }
 
 /// 更新客户端 Key 元数据

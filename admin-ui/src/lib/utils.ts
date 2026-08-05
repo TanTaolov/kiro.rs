@@ -202,6 +202,45 @@ export function normalizeImportAuthMethod(
   return { authMethod: 'social' }
 }
 
+/**
+ * 复制文本到剪贴板，返回是否成功。
+ *
+ * 面板常以 HTTP 直连 IP 部署，此时浏览器不提供 `navigator.clipboard`（非安全上下文），
+ * 因此优先走异步 Clipboard API，失败再回退到隐藏 textarea + `execCommand('copy')`。
+ * 两条路径都失败时返回 false，交由调用方引导用户手动复制。
+ */
+export async function copyTextToClipboard(text: string): Promise<boolean> {
+  if (window.isSecureContext && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text)
+      return true
+    } catch {
+      // 权限被拒或用户手势已失效，继续尝试下面的兜底路径
+    }
+  }
+
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  // 保持在视口内但不可见，避免 iOS Safari 因元素不可见而拒绝选中
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'fixed'
+  textarea.style.top = '0'
+  textarea.style.left = '0'
+  textarea.style.opacity = '0'
+  textarea.style.pointerEvents = 'none'
+  document.body.appendChild(textarea)
+
+  try {
+    textarea.select()
+    textarea.setSelectionRange(0, text.length)
+    return document.execCommand('copy')
+  } catch {
+    return false
+  } finally {
+    document.body.removeChild(textarea)
+  }
+}
+
 export function maskProxyUrl(url: string): string {
   const match = url.match(/^(\w+:\/\/)([^:@]+):([^@]+)@(.+)$/)
   if (!match) return url

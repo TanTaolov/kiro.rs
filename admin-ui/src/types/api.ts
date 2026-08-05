@@ -141,6 +141,8 @@ export interface AddCredentialRequest {
   email?: string
   groups?: string[]
   sourceChannel?: string
+  /** 凭据添加（创建）时间，RFC3339 格式，导入时携带原始时间 */
+  createdAt?: string
 }
 
 // 添加凭据响应
@@ -202,11 +204,6 @@ export interface AddProxyRequest {
 // 批量添加代理请求
 export interface BatchAddProxyRequest {
   urls: string[]
-}
-
-// 分配代理给凭据请求
-export interface AssignProxyRequest {
-  proxyId?: number | null
 }
 
 // 批量添加代理响应
@@ -402,12 +399,19 @@ export interface CreateClientKeyRequest {
   group?: string
 }
 
-/** 创建响应：明文 Key 仅在此处返回一次 */
+/** 创建响应：返回新生成的明文 Key */
 export interface CreateClientKeyResponse {
   id: number
   key: string
   name: string
   createdAt: string
+}
+
+/** 查看明文响应：按需单独拉取，列表接口只返回脱敏值 */
+export interface RevealClientKeyResponse {
+  id: number
+  key: string
+  name: string
 }
 
 export interface UpdateClientKeyRequest {

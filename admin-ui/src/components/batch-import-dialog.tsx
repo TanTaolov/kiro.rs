@@ -45,6 +45,8 @@ interface CredentialInput {
   tokenEndpoint?: string
   issuerUrl?: string
   scopes?: string
+  // 凭据添加时间（毫秒时间戳），导入时携带原始时间
+  createdAt?: number
 }
 
 interface VerificationResult {
@@ -184,6 +186,7 @@ export function BatchImportDialog({ open, onOpenChange }: BatchImportDialogProps
               proxyUrl: cred.proxyUrl?.trim() || undefined,
               proxyUsername: cred.proxyUsername?.trim() || undefined,
               proxyPassword: cred.proxyPassword?.trim() || undefined,
+              createdAt: cred.createdAt != null ? new Date(cred.createdAt).toISOString() : undefined,
             },
           })
         } else {
@@ -239,6 +242,7 @@ export function BatchImportDialog({ open, onOpenChange }: BatchImportDialogProps
               proxyUrl: cred.proxyUrl?.trim() || undefined,
               proxyUsername: cred.proxyUsername?.trim() || undefined,
               proxyPassword: cred.proxyPassword?.trim() || undefined,
+              createdAt: cred.createdAt != null ? new Date(cred.createdAt).toISOString() : undefined,
             },
           })
         }

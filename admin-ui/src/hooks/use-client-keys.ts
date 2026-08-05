@@ -7,6 +7,7 @@ import {
   setClientKeyDisabled,
   resetClientKeyStats,
   rotateClientKey,
+  revealClientKey,
 } from '@/api/client-keys'
 import type { CreateClientKeyRequest, UpdateClientKeyRequest } from '@/types/api'
 
@@ -65,5 +66,17 @@ export function useRotateClientKey() {
   return useMutation({
     mutationFn: (id: number) => rotateClientKey(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['client-keys'] }),
+  })
+}
+
+/**
+ * 按需拉取 Key 明文。
+ *
+ * 用 mutation 而非 query：明文是用户主动触发的一次性读取，不应进入 query 缓存被
+ * 后台重新拉取或长期驻留在内存里。这里也不需要 invalidate 列表（明文读取不改数据）。
+ */
+export function useRevealClientKey() {
+  return useMutation({
+    mutationFn: (id: number) => revealClientKey(id),
   })
 }

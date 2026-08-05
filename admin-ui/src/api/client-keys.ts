@@ -4,6 +4,7 @@ import type {
   ClientKeysResponse,
   CreateClientKeyRequest,
   CreateClientKeyResponse,
+  RevealClientKeyResponse,
   UpdateClientKeyRequest,
   SuccessResponse,
 } from '@/types/api'
@@ -60,5 +61,15 @@ export async function resetClientKeyStats(id: number): Promise<SuccessResponse> 
 
 export async function rotateClientKey(id: number): Promise<CreateClientKeyResponse> {
   const { data } = await api.post<CreateClientKeyResponse>(`/client-keys/${id}/rotate`)
+  return data
+}
+
+/**
+ * 拉取指定 Key 的明文，用于「复制明文」与「查看明文」。
+ *
+ * 明文不随列表返回，只在用户主动触发时按 id 请求一次，避免列表轮询反复携带敏感值。
+ */
+export async function revealClientKey(id: number): Promise<RevealClientKeyResponse> {
+  const { data } = await api.get<RevealClientKeyResponse>(`/client-keys/${id}/plaintext`)
   return data
 }

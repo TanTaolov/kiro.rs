@@ -195,7 +195,7 @@ function LoggedInApp({
         onToggleDarkMode={onToggleDarkMode}
       />
       <AppMain tab={tab} onLogout={onLogout} />
-      <Toaster position="top-center" />
+      <Toaster position="bottom-right" />
     </ConfirmProvider>
   );
 }
@@ -305,7 +305,7 @@ function GithubButton() {
       className="hidden xl:inline-flex"
     >
       <a
-        href="https://github.com/ZyphrZero/kiro.rs"
+        href="https://github.com/TanTaolov/kiro.rs"
         target="_blank"
         rel="noopener noreferrer"
         aria-label="GitHub 仓库"

@@ -1307,7 +1307,7 @@ export function Dashboard({ onLogout, embedded = false }: DashboardProps) {
               </Button>
               <Button variant="ghost" size="icon" asChild title="GitHub 仓库">
                 <a
-                  href="https://github.com/ZyphrZero/kiro.rs"
+                  href="https://github.com/TanTaolov/kiro.rs"
                   target="_blank"
                   rel="noopener noreferrer"
                   aria-label="GitHub 仓库"
@@ -1761,7 +1761,7 @@ export function Dashboard({ onLogout, embedded = false }: DashboardProps) {
                   title="卡片视图"
                   className={`inline-flex h-7 items-center gap-1 rounded-full px-2.5 text-[13px] transition-colors ${
                     viewMode === "card"
-                      ? "bg-background text-foreground shadow-apple-sm"
+                      ? "bg-primary text-primary-foreground shadow-apple-sm"
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
@@ -1775,7 +1775,7 @@ export function Dashboard({ onLogout, embedded = false }: DashboardProps) {
                   title="列表视图"
                   className={`inline-flex h-7 items-center gap-1 rounded-full px-2.5 text-[13px] transition-colors ${
                     viewMode === "list"
-                      ? "bg-background text-foreground shadow-apple-sm"
+                      ? "bg-primary text-primary-foreground shadow-apple-sm"
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >

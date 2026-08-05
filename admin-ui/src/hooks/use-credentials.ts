@@ -6,7 +6,6 @@ import {
   resetCredentialFailure,
   forceRefreshToken,
   clearThrottle,
-  getCredentialBalance,
   getCredentialModels,
   getCurrentCredentialModels,
   testModel,
@@ -35,16 +34,6 @@ export function useCredentials() {
     queryKey: ['credentials'],
     queryFn: getCredentials,
     refetchInterval: 30000, // 每 30 秒刷新一次
-  })
-}
-
-// 查询凭据余额
-export function useCredentialBalance(id: number | null) {
-  return useQuery({
-    queryKey: ['credential-balance', id],
-    queryFn: () => getCredentialBalance(id!),
-    enabled: id !== null,
-    retry: false, // 余额查询失败时不重试（避免重复请求被封禁的账号）
   })
 }
 

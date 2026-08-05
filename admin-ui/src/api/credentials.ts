@@ -17,7 +17,6 @@ import type {
   AddProxyRequest,
   BatchAddProxyRequest,
   BatchAddProxyResponse,
-  AssignProxyRequest,
   ProxyCheckResponse,
   ProxyCheckAllResponse,
   AssignRoundRobinResponse,
@@ -383,15 +382,6 @@ export async function deleteProxy(id: number): Promise<SuccessResponse> {
 // 设置代理启用/禁用
 export async function setProxyEnabled(id: number, enabled: boolean): Promise<SuccessResponse> {
   const { data } = await api.post<SuccessResponse>(`/proxy-pool/${id}/enabled`, { enabled })
-  return data
-}
-
-// 分配代理给凭据
-export async function assignProxyToCredential(
-  credentialId: number,
-  req: AssignProxyRequest
-): Promise<SuccessResponse> {
-  const { data } = await api.post<SuccessResponse>(`/credentials/${credentialId}/proxy`, req)
   return data
 }
 

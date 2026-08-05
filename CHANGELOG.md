@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file. The format
 loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### ✨ 增强 — 客户端 Key 支持复制明文
+
+- **Key 列新增复制明文按钮**：脱敏值旁提供一键复制，点击后按需拉取该 Key 的明文并写入剪贴板；复制中显示 loading，成功后短暂显示对勾。列表接口仍只返回脱敏值，明文改为按 id 单独拉取，避免 30 秒轮询把全量明文反复带到前端。
+- **新增查看明文入口**：Key 下拉菜单增加「查看明文」，在弹窗中以可切换显示 / 遮蔽的方式展示当前生效明文。
+- **新增 `GET /api/admin/client-keys/{id}/plaintext`**：回读单把 Key 的明文，受 Admin 鉴权中间件保护，响应带 `Cache-Control: no-store`。明文原本就以原值持久化在 `client_api_keys.json`（鉴权需要原值比对），此接口不改变存储侧的安全假设。
+- **剪贴板不可用时自动兜底**：面板以 HTTP 直连 IP 部署时浏览器不提供 `navigator.clipboard`，此时回退到 `execCommand('copy')`；仍失败则展开明文弹窗，引导用户手动选中复制。
+- **修正过时的一次性提示**：创建 / 轮换后的弹窗不再声称「关闭后将无法再查看」，改为说明之后可在列表重新取回，与实际行为一致。
+
 ## [0.7.5] - 2026-08-05
 
 主题：**为多账号调度加入单账号 RPM 主动限流，并集中增强管理端的凭据筛选、批量操作、创建时间、请求计费与移动端可用性**。本版同时加固 WebSearch MCP 的查询参数兼容和 Enterprise / IdC 路由；新增配置默认关闭或带有 `serde(default)`，旧 `config.json` 与 `credentials.json` 无需迁移。

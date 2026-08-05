@@ -326,6 +326,14 @@ impl ClientKeyManager {
         self.inner.read().entries.get(&id).and_then(|e| e.group.clone())
     }
 
+    /// 按 id 取单条 Key 的快照（含明文，Key 不存在时返回 None）。
+    ///
+    /// 明文本就以原值持久化在 `client_api_keys.json`（鉴权必须拿原值做比对），
+    /// 这里只是把已有数据交给通过 Admin 鉴权的调用方，不额外放宽存储侧的安全假设。
+    pub fn snapshot_of(&self, id: u64) -> Option<ClientKey> {
+        self.inner.read().entries.get(&id).cloned()
+    }
+
     /// 列出所有当前被引用的分组名（仅去重，不带计数）。
     pub fn used_group_names(&self) -> Vec<String> {
         let inner = self.inner.read();

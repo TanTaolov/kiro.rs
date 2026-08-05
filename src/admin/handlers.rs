@@ -22,7 +22,7 @@ use super::{
         AddCredentialRequest, AddProxyRequest, AssignProxyRequest, AssignRoundRobinRequest,
         BatchAddProxyRequest, BatchImportEvent, BatchImportRequest, BatchImportSummary,
         ClientKeyItem, ClientKeysResponse, CompleteSocialLoginRequest, CreateClientKeyRequest,
-        CreateClientKeyResponse, GlobalProxyResponse, ModelTestRequest,
+        CreateClientKeyResponse, GlobalProxyResponse, ModelTestRequest, RevealClientKeyResponse,
         SetAccountRpmLimitConfigRequest, SetAccountThrottleConfigRequest, SetDisabledRequest,
         SetGlobalProxyRequest,
         SetLoadBalancingModeRequest, SetLogGovernanceConfigRequest, SetPriorityRequest,
@@ -1053,10 +1053,42 @@ pub async fn reset_client_key_stats(
     }
 }
 
+/// GET /api/admin/client-keys/:id/plaintext
+///
+/// 回读 Key 明文，供管理端「复制明文」按钮使用。列表接口只返回脱敏值，
+/// 明文单独按需拉取，避免每次轮询列表都把全量明文带到前端。
+/// 已由 Admin 鉴权中间件保护；响应标记 `no-store`，防止中间层或浏览器缓存明文。
+pub async fn reveal_client_key(
+    State(state): State<AdminState>,
+    Path(id): Path<u64>,
+) -> impl IntoResponse {
+    let Some(entry) = state.client_keys.snapshot_of(id) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(super::types::AdminErrorResponse::not_found(format!(
+                "Key #{} 不存在",
+                id
+            ))),
+        )
+            .into_response();
+    };
+
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(RevealClientKeyResponse {
+            id: entry.id,
+            key: entry.key,
+            name: entry.name,
+        }),
+    )
+        .into_response()
+}
+
 /// POST /api/admin/client-keys/:id/rotate
 ///
-/// 轮换 Key 值：旧明文立即失效，生成新明文返回（仅此一次可见）。
+/// 轮换 Key 值：旧明文立即失效，生成并返回新明文。
 /// 保留 id/name/description/group/统计/disabled 不变，无需重新分组绑定。
+/// 新明文之后也可通过 `GET /client-keys/:id/plaintext` 重新取回。
 pub async fn rotate_client_key(
     State(state): State<AdminState>,
     Path(id): Path<u64>,
@@ -1442,6 +1474,14 @@ pub async fn trace_failure_stats(State(state): State<AdminState>) -> impl IntoRe
         })
         .collect();
     Json(map)
+}
+
+/// DELETE /api/admin/traces
+/// 清空全部请求链路追踪记录（traces + 关联 attempts）。
+/// 返回 { deleted: N }
+pub async fn clear_traces(State(state): State<AdminState>) -> impl IntoResponse {
+    let deleted = state.trace_store.clear();
+    Json(serde_json::json!({ "deleted": deleted }))
 }
 
 // ============ 账号分组（独立实体）============

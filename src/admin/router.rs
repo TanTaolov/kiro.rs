@@ -11,7 +11,8 @@ use super::{
     handlers::{
         add_credential, add_proxy, apply_image_update, assign_proxies_round_robin,
         assign_proxy_to_credential, batch_add_proxies, batch_import_credentials, check_all_proxies,
-        check_proxy, check_rate_limit, check_update, clear_throttle, complete_social_login,
+        check_proxy, check_rate_limit, check_update, clear_throttle, clear_traces,
+        complete_social_login,
         complete_social_relogin, create_client_key, create_group, delete_client_key,
         delete_credential, delete_group, delete_proxy, disable_quota_exceeded, enable_overage_all,
         export_credentials, force_refresh_token, get_account_rpm_limit_config,
@@ -21,7 +22,7 @@ use super::{
         get_update_config, list_client_keys, list_groups, list_traces, poll_idc_login,
         poll_idc_relogin, poll_social_login, poll_social_relogin, pull_update_image,
         reset_all_success_count, reset_client_key_stats, reset_failure_count, reset_success_count,
-        rollback_image_update, rotate_client_key, set_account_rpm_limit_config,
+        reveal_client_key, rollback_image_update, rotate_client_key, set_account_rpm_limit_config,
         set_account_throttle_config,
         set_client_key_disabled, set_credential_disabled, set_credential_overage,
         set_credential_priority, set_global_proxy, set_load_balancing_mode,
@@ -177,6 +178,7 @@ pub fn create_admin_router(state: AdminState) -> Router {
             "/client-keys/{id}/reset-stats",
             post(reset_client_key_stats),
         )
+        .route("/client-keys/{id}/plaintext", get(reveal_client_key))
         .route("/client-keys/{id}/rotate", post(rotate_client_key))
         .route("/groups", get(list_groups).post(create_group))
         .route("/groups/{name}", delete(delete_group).patch(update_group))
@@ -185,7 +187,7 @@ pub fn create_admin_router(state: AdminState) -> Router {
         .route("/stats/by-model", get(stats_by_model))
         .route("/stats/by-credential", get(stats_by_credential))
         .route("/traces/failure-stats", get(trace_failure_stats))
-        .route("/traces", get(list_traces))
+        .route("/traces", get(list_traces).delete(clear_traces))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             admin_auth_middleware,

@@ -478,6 +478,15 @@ fn credential_to_export_account(cred: KiroCredentials) -> Option<ExportedAccount
         "lastUpdated": now_ms,
     });
 
+    // 存活时间以添加时刻为基准，导出必须携带真实的 created_at。
+    // 若沿用导出时刻，导出再导入会把已积累的存活时长清零。
+    let created_at_ms = cred
+        .created_at
+        .as_deref()
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| dt.timestamp_millis())
+        .unwrap_or(now_ms);
+
     // 仅导出真实 profileArn，跳过 BuilderID 占位符
     let profile_arn = cred.effective_profile_arn().map(str::to_string);
 
@@ -512,7 +521,7 @@ fn credential_to_export_account(cred: KiroCredentials) -> Option<ExportedAccount
         usage,
         tags: Vec::new(),
         status,
-        created_at: now_ms,
+        created_at: created_at_ms,
         last_used_at: now_ms,
     })
 }
@@ -536,7 +545,7 @@ fn subscription_type_from_title(title: Option<&str>) -> &'static str {
 
 /// GitHub Release 仓库名（owner/repo）。
 /// 在线更新所需的版本号、changelog、二进制资产都从这里取。
-const GITHUB_RELEASES_REPO: &str = "ZyphrZero/kiro.rs";
+const GITHUB_RELEASES_REPO: &str = "TanTaolov/kiro.rs";
 
 impl AdminService {
     pub fn new(
@@ -1293,8 +1302,8 @@ impl AdminService {
             endpoint: req.endpoint,
             groups: req.groups,
             source_channel: req.source_channel,
-            // 创建时间由 token_manager.add_credential 在入库时统一写入
-            created_at: None,
+            // 导入时若携带原始创建时间，透传给 token_manager；否则入库时生成
+            created_at: req.created_at,
         };
 
         // 调用 token_manager 添加凭据

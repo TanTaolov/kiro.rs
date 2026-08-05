@@ -55,21 +55,21 @@
 - **Prompt cache 计量**：模拟 Anthropic cache_control 的 `cache_creation` / `cache_read` token 统计。
 - **用量统计**：按客户端 Key、模型、凭据、日期聚合 input/output/cache token 和 credits。
 - **请求链路追踪**：SQLite `traces.db`，记录成功 / 失败请求、尝试链路和错误类型。
-- 客户端 Key 分发：Admin 面板生成 `sk-...` Key，支持独立启停、轮换、分组和统计；鉴权不强制 Key 前缀。
+- 客户端 Key 分发：Admin 面板生成 `sk-...` Key，支持独立启停、轮换、分组、统计和明文复制；鉴权不强制 Key 前缀。
 - **Admin UI**：概览、凭据管理、客户端 Key、请求日志四个主视图。
 - 代理能力：全局代理、凭据级代理、代理池、健康检查、轮询分配。
-- **在线更新**：从 GitHub Release / Docker Hub 拉取新版本，支持镜像定时自动更新与手动回退。
-- **多平台发布**：GitHub Release 构建 Windows、Linux、macOS 和 Docker Hub 多架构镜像。
+- **在线更新**：从 GitHub Release 下载新版本，支持定时自动更新与手动回退。
+- **多平台发布**：GitHub Release 构建 Windows、Linux、macOS 二进制，并发布到 GitHub Container Registry（GHCR）多架构镜像。
 
 <a id="quick-start"></a>
 ## 🚀 快速开始
 
 ### Docker
 
-推荐生产部署使用 Docker。仓库提供的 `docker-compose.yml` 默认使用 Docker Hub 镜像：
+推荐生产部署使用 Docker。仓库提供的 `docker-compose.yml` 默认使用 GitHub Container Registry（GHCR）镜像：
 
 ```yaml
-image: ${KIRO_RS_IMAGE:-zyphrzero/kiro-rs:latest}
+image: ${KIRO_RS_IMAGE:-ghcr.io/tantaolov/kiro-rs:latest}
 ports:
   - "8990:8990"
 volumes:
@@ -81,7 +81,7 @@ volumes:
 ```bash
 mkdir -p /opt/kiro-rs/data
 cd /opt/kiro-rs
-curl -O https://raw.githubusercontent.com/ZyphrZero/kiro.rs/master/docker-compose.yml
+curl -O https://raw.githubusercontent.com/TanTaolov/kiro.rs/master/docker-compose.yml
 docker compose up -d
 ```
 
@@ -121,12 +121,12 @@ docker compose logs --tail=200 kiro-rs
 指定镜像版本：
 
 ```bash
-KIRO_RS_IMAGE=zyphrzero/kiro-rs:0.7.3 docker compose up -d
+KIRO_RS_IMAGE=ghcr.io/tantaolov/kiro-rs:0.7.3 docker compose up -d
 ```
 
 ### 下载二进制
 
-正式版本会在 [GitHub Release](https://github.com/ZyphrZero/kiro.rs/releases/latest) 中发布以下平台产物：
+正式版本会在 [GitHub Release](https://github.com/TanTaolov/kiro.rs/releases/latest) 中发布以下平台产物：
 
 - Windows x64
 - Linux x64 / arm64
@@ -796,13 +796,12 @@ credential.proxyUrl -> config.proxyUrl -> direct
 - 构建并推送 Docker Hub 多架构镜像。
 - 创建 GitHub Release。
 
-当前稳定版：[v0.7.3](https://github.com/ZyphrZero/kiro.rs/releases/tag/v0.7.3)。
+当前稳定版：[v0.7.3](https://github.com/TanTaolov/kiro.rs/releases/tag/v0.7.3)。
 
 Docker 镜像：
 
-- `zyphrzero/kiro-rs:<version>`
-- `zyphrzero/kiro-rs:latest`
-- `zyphrzero/kiro-rs:beta`（master beta 构建）
+- `ghcr.io/tantaolov/kiro-rs:<version>`
+- `ghcr.io/tantaolov/kiro-rs:latest`
 
 容器内在线更新会下载对应平台二进制并替换当前可执行文件；替换后进程退出，由 Docker `restart: unless-stopped` 拉起新进程。回退依赖本地 `<exe>.backup`。
 

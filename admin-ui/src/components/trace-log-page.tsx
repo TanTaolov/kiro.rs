@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   Unplug,
   Settings2,
+  Trash2,
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -38,6 +39,8 @@ import {
 import { useTraces } from '@/hooks/use-traces'
 import { useClientKeys } from '@/hooks/use-client-keys'
 import { useGroupOptions } from '@/hooks/use-groups'
+import { clearTraces } from '@/api/traces'
+import { useConfirm } from '@/components/ui/confirm-dialog'
 import {
   useLogGovernanceConfig,
   useSetLogGovernanceConfig,
@@ -552,6 +555,8 @@ export function TraceLogPage() {
   const [group, setGroup] = useState('')
   const [onlyFailed, setOnlyFailed] = useState(false)
   const [page, setPage] = useState(0)
+  const [clearing, setClearing] = useState(false)
+  const confirm = useConfirm()
 
   const { data: keysData } = useClientKeys()
   const keyOptions = [
@@ -585,6 +590,29 @@ export function TraceLogPage() {
   const total = data?.total ?? 0
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
+  const handleClear = async () => {
+    if (
+      !(await confirm({
+        title: '清理全部请求日志',
+        description: `确认清空全部 ${total} 条请求日志？清理后不可恢复。`,
+        confirmText: '清空日志',
+        destructive: true,
+      }))
+    )
+      return
+    try {
+      setClearing(true)
+      const res = await clearTraces()
+      toast.success(res.deleted > 0 ? `已清空 ${res.deleted} 条请求日志` : '请求日志已清空')
+      setPage(0)
+      refetch()
+    } catch (err) {
+      toast.error('清理失败：' + extractErrorMessage(err))
+    } finally {
+      setClearing(false)
+    }
+  }
+
   return (
     <div className="space-y-5">
       {/* 筛选栏 */}
@@ -617,6 +645,16 @@ export function TraceLogPage() {
           <Button size="sm" variant="outline" onClick={() => refetch()} disabled={isFetching}>
             <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? 'animate-spin' : ''}`} />
             刷新
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleClear}
+            disabled={clearing || total === 0}
+            className="text-destructive hover:text-destructive"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            {clearing ? '清理中…' : '清理日志'}
           </Button>
         </div>
       </div>

@@ -1,4 +1,9 @@
-import { useState, useEffect, useCallback } from "react";
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useSyncExternalStore,
+} from "react";
 import { toast } from "sonner";
 import {
   RefreshCw,
@@ -89,24 +94,141 @@ function formatLastUsed(lastUsedAt: string | null): string {
   return `${Math.floor(h / 24)} 天前`;
 }
 
-/** 添加时间用绝对日期展示（凭据的创建时刻是固定事实，相对时间意义不大） */
+/** 解析后端返回的 RFC3339 时间戳；缺失或非法时返回 null */
+function parseTimestamp(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/**
+ * 添加时间用绝对时刻展示（凭据的创建时刻是固定事实，相对时间意义不大）。
+ *
+ * 精确到秒：批量导入会在同一天落下多条凭据，只给到日期无法区分先后。
+ */
 function formatCreatedAt(createdAt: string | null | undefined): string {
-  if (!createdAt) return "未知";
-  const date = new Date(createdAt);
-  if (Number.isNaN(date.getTime())) return "未知";
-  return date.toLocaleDateString("zh-CN", {
+  const date = parseTimestamp(createdAt);
+  if (!date) return "未知";
+  return date.toLocaleString("zh-CN", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+}
+
+/** 列表行横向空间有限：省略年份，但保留到秒 */
+function formatCreatedAtCompact(createdAt: string | null | undefined): string {
+  const date = parseTimestamp(createdAt);
+  if (!date) return "未知";
+  return date.toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
   });
 }
 
 /** 完整时间戳，用于 hover 提示 */
 function formatCreatedAtFull(createdAt: string | null | undefined): string {
-  if (!createdAt) return "添加时间未知（该凭据在此功能上线前导入）";
-  const date = new Date(createdAt);
-  if (Number.isNaN(date.getTime())) return "添加时间未知";
-  return `添加于 ${date.toLocaleString("zh-CN")}`;
+  const date = parseTimestamp(createdAt);
+  if (!date) return "添加时间未知（该凭据在此功能上线前导入）";
+  return `添加于 ${date.toLocaleString("zh-CN", { hour12: false })}`;
+}
+
+/**
+ * 凭据存活时长（自添加时刻起累计）。
+ *
+ * 超过一天后以「天 + 时:分:秒」呈现：既能一眼看出量级，又保留秒级变化，
+ * 让用户直观感知这是实时推进的值而非静态快照。
+ */
+function formatCredentialAge(
+  createdAt: string | null | undefined,
+  nowMs: number,
+): string {
+  const createdDate = parseTimestamp(createdAt);
+  if (!createdDate) return "未知";
+  const elapsedSeconds = Math.floor((nowMs - createdDate.getTime()) / 1000);
+  // 服务端与浏览器时钟可能有偏差，未来时间按“刚刚”处理而不是显示负数
+  if (elapsedSeconds <= 0) return "刚刚添加";
+  const days = Math.floor(elapsedSeconds / 86400);
+  const hours = Math.floor((elapsedSeconds % 86400) / 3600);
+  const minutes = Math.floor((elapsedSeconds % 3600) / 60);
+  const seconds = elapsedSeconds % 60;
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const clock = `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+  return days > 0 ? `${days} 天 ${clock}` : clock;
+}
+
+/**
+ * 全局共享的「当前时间」心跳。
+ *
+ * 存活时间需要持续走秒，而列表里可能同时渲染上百张卡片。若每张卡片各自
+ * setInterval，定时器数量会随凭据数线性膨胀。这里用模块级单例：所有订阅者
+ * 共用一个 1 秒定时器，且仅在存在订阅者时才运行。
+ */
+const AGE_TICK_INTERVAL_MS = 1000;
+const ageTickSubscribers = new Set<() => void>();
+let ageTickIntervalId: number | null = null;
+// useSyncExternalStore 要求 getSnapshot 在两次心跳之间返回稳定值；
+// 直接返回 Date.now() 会被 React 判定为状态持续变化而反复重渲染。
+let ageTickTimestampMs = Date.now();
+
+function publishAgeTick(): void {
+  ageTickTimestampMs = Date.now();
+  for (const notifySubscriber of ageTickSubscribers) notifySubscriber();
+}
+
+function subscribeToAgeTick(onStoreChange: () => void): () => void {
+  ageTickSubscribers.add(onStoreChange);
+  if (ageTickIntervalId === null) {
+    // 首个订阅者：立即对齐一次，避免展示定时器停摆期间的旧值
+    ageTickTimestampMs = Date.now();
+    ageTickIntervalId = window.setInterval(publishAgeTick, AGE_TICK_INTERVAL_MS);
+    // 后台标签页的定时器会被浏览器降频，切回前台时补一次以立即消除滞后
+    document.addEventListener("visibilitychange", publishAgeTick);
+  }
+  return () => {
+    ageTickSubscribers.delete(onStoreChange);
+    if (ageTickSubscribers.size === 0 && ageTickIntervalId !== null) {
+      window.clearInterval(ageTickIntervalId);
+      ageTickIntervalId = null;
+      document.removeEventListener("visibilitychange", publishAgeTick);
+    }
+  };
+}
+
+function getAgeTickTimestampMs(): number {
+  return ageTickTimestampMs;
+}
+
+/** 订阅全局心跳，返回每秒推进一次的当前时间戳（毫秒） */
+function useTickingNow(): number {
+  return useSyncExternalStore(
+    subscribeToAgeTick,
+    getAgeTickTimestampMs,
+    getAgeTickTimestampMs,
+  );
+}
+
+/**
+ * 存活时间文本，自行订阅心跳。
+ *
+ * 单独抽成叶子组件，让每秒一次的重渲染只作用于这一小段文本，
+ * 不会带动整张凭据卡片（含余额面板、徽章、下拉菜单）一起重渲染。
+ */
+function CredentialAgeText({
+  createdAt,
+}: {
+  createdAt: string | null | undefined;
+}) {
+  const nowMs = useTickingNow();
+  return <>{formatCredentialAge(createdAt, nowMs)}</>;
 }
 
 function formatNumber(n: number): string {
@@ -770,8 +892,8 @@ export function CredentialCard({
         )}
       </div>
 
-      {/* 最后调用 + 添加时间（中大屏） */}
-      <div className="hidden w-24 shrink-0 truncate text-right text-xs md:block">
+      {/* 最后调用 + 添加时间 + 存活时间（中大屏） */}
+      <div className="hidden w-32 shrink-0 truncate text-right text-xs md:block">
         <div className="truncate text-muted-foreground">
           {formatLastUsed(credential.lastUsedAt)}
         </div>
@@ -779,7 +901,13 @@ export function CredentialCard({
           className="truncate text-[11px] tabular-nums text-muted-foreground/60"
           title={formatCreatedAtFull(credential.createdAt)}
         >
-          添加 {formatCreatedAt(credential.createdAt)}
+          添加 {formatCreatedAtCompact(credential.createdAt)}
+        </div>
+        <div
+          className="truncate text-[11px] tabular-nums text-muted-foreground/60"
+          title="自添加时刻起累计的存活时长，每秒实时更新"
+        >
+          存活 <CredentialAgeText createdAt={credential.createdAt} />
         </div>
       </div>
 
@@ -1008,6 +1136,15 @@ export function CredentialCard({
                 title={formatCreatedAtFull(credential.createdAt)}
               >
                 {formatCreatedAt(credential.createdAt)}
+              </dd>
+            </div>
+            <div className="flex min-w-0 items-center justify-between gap-2 min-[420px]:col-span-2">
+              <dt className="shrink-0 text-muted-foreground">存活时间</dt>
+              <dd
+                className="min-w-0 truncate text-right font-medium tabular-nums"
+                title="自添加时刻起累计的存活时长，每秒实时更新"
+              >
+                <CredentialAgeText createdAt={credential.createdAt} />
               </dd>
             </div>
             {credential.maskedApiKey && (

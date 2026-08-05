@@ -606,6 +606,40 @@ impl TraceStore {
         }
     }
 
+    /// 清空全部 trace 记录（traces + 关联 attempts）。
+    /// 返回删除的 trace 条数；事务失败时返回 0 并仅 warn。
+    pub fn clear(&self) -> usize {
+        let mut conn = self.conn.lock();
+        let tx = match conn.transaction() {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::warn!("trace 清空事务失败: {}", e);
+                return 0;
+            }
+        };
+        let res = (|| -> rusqlite::Result<usize> {
+            tx.execute("DELETE FROM trace_attempts", [])?;
+            let n = tx.execute("DELETE FROM traces", [])?;
+            Ok(n)
+        })();
+        match res {
+            Ok(n) => {
+                if let Err(e) = tx.commit() {
+                    tracing::warn!("trace 清空提交失败: {}", e);
+                    return 0;
+                }
+                if n > 0 {
+                    tracing::info!("已清空全部 {} 条 trace 记录", n);
+                }
+                n
+            }
+            Err(e) => {
+                tracing::warn!("trace 清空失败: {}", e);
+                0
+            }
+        }
+    }
+
     /// 按凭据聚合失败跳数，归并为三类：鉴权 / 账号风控 / 其他。
     /// 统计 trace_attempts 里 outcome != 'success' 的跳，按 credential_id + outcome 分组。
     /// 返回 credential_id → (auth, throttle, other)。仅 warn 失败，返回空。

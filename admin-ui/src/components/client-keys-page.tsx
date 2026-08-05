@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import {
-  Plus, KeyRound, Trash2, Copy, Eye, EyeOff, Power, RotateCcw, Pencil, RefreshCw,
+  Plus, KeyRound, Trash2, Copy, Check, Eye, EyeOff, Power, RotateCcw, Pencil, RefreshCw, Loader2,
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -16,13 +16,27 @@ import {
 import {
   useClientKeys, useCreateClientKey, useDeleteClientKey,
   useSetClientKeyDisabled, useResetClientKeyStats, useUpdateClientKey,
-  useRotateClientKey,
+  useRotateClientKey, useRevealClientKey,
 } from '@/hooks/use-client-keys'
 import { useGroupOptions } from '@/hooks/use-groups'
 import { GroupSingleSelect } from '@/components/group-select'
-import type { ClientKeyItem, CreateClientKeyResponse } from '@/types/api'
-import { extractErrorMessage } from '@/lib/utils'
+import type { ClientKeyItem } from '@/types/api'
+import { copyTextToClipboard, extractErrorMessage } from '@/lib/utils'
 import { useConfirm } from '@/components/ui/confirm-dialog'
+
+/**
+ * 明文对话框的数据来源。
+ *
+ * - `created`：刚创建 / 刚轮换出的新明文，需提示用户这是新值、旧值已失效
+ * - `revealed`：用户主动查看现有 Key 的明文，或自动复制失败后的手动复制兜底
+ */
+type PlainKeyOrigin = 'created' | 'revealed'
+
+interface PlainKeyView {
+  key: string
+  name: string
+  origin: PlainKeyOrigin
+}
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + 'M'
@@ -40,6 +54,13 @@ function formatRelative(ts?: string): string {
   return `${Math.floor(diff / 86400_000)} 天前`
 }
 
+/** 缓存命中率 = 缓存读 / (输入 + 缓存读)，与趋势图口径一致；无读取时为 0% */
+function formatCacheRate(item: ClientKeyItem): string {
+  const denominator = item.totalInputTokens + item.totalCacheReadTokens
+  if (denominator <= 0) return '0%'
+  return `${((item.totalCacheReadTokens / denominator) * 100).toFixed(1)}%`
+}
+
 export function ClientKeysPage() {
   const { data, isLoading } = useClientKeys()
   // 已注册分组列表（来自 groups.json 注册表，与凭据的 groups 字段解耦）
@@ -50,20 +71,31 @@ export function ClientKeysPage() {
   const resetStats = useResetClientKeyStats()
   const updateKey = useUpdateClientKey()
   const rotateKey = useRotateClientKey()
+  const revealKey = useRevealClientKey()
   const confirm = useConfirm()
 
   const [createOpen, setCreateOpen] = useState(false)
   const [createName, setCreateName] = useState('')
   const [createDesc, setCreateDesc] = useState('')
   const [createGroup, setCreateGroup] = useState('')
-  const [createdKey, setCreatedKey] = useState<CreateClientKeyResponse | null>(null)
-  const [showCreatedPlain, setShowCreatedPlain] = useState(true)
+  const [plainKeyView, setPlainKeyView] = useState<PlainKeyView | null>(null)
+  const [showPlainKey, setShowPlainKey] = useState(true)
+  // 逐行跟踪复制状态：请求明文期间显示 loading，复制成功后短暂显示对勾
+  const [copyingKeyId, setCopyingKeyId] = useState<number | null>(null)
+  const [copiedKeyId, setCopiedKeyId] = useState<number | null>(null)
 
   const [editOpen, setEditOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<ClientKeyItem | null>(null)
   const [editName, setEditName] = useState('')
   const [editDesc, setEditDesc] = useState('')
   const [editGroup, setEditGroup] = useState('')
+
+  // 复制成功的对勾在 2 秒后复原；卸载或再次复制时清理定时器，避免状态错乱
+  useEffect(() => {
+    if (copiedKeyId === null) return
+    const timer = setTimeout(() => setCopiedKeyId(null), 2000)
+    return () => clearTimeout(timer)
+  }, [copiedKeyId])
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -78,12 +110,11 @@ export function ClientKeysPage() {
         description: createDesc.trim() || undefined,
         group: createGroup.trim() || undefined,
       })
-      setCreatedKey(res)
+      openPlainKeyDialog({ key: res.key, name: res.name, origin: 'created' }, true)
       setCreateOpen(false)
       setCreateName('')
       setCreateDesc('')
       setCreateGroup('')
-      setShowCreatedPlain(true)
     } catch (err) {
       toast.error('创建失败：' + extractErrorMessage(err))
     }
@@ -148,8 +179,7 @@ export function ClientKeysPage() {
       return
     try {
       const res = await rotateKey.mutateAsync(item.id)
-      setCreatedKey(res)
-      setShowCreatedPlain(true)
+      openPlainKeyDialog({ key: res.key, name: res.name, origin: 'created' }, true)
       // 系统密钥轮换后本地存储的 apiKey 已失效，提示用户用新明文重新登录
       if (item.isSystem) {
         toast.info('系统密钥已更新，若你正用该密钥登录管理面板，请用新明文重新登录')
@@ -182,12 +212,53 @@ export function ClientKeysPage() {
     }
   }
 
-  const copyText = async (text: string) => {
+  /**
+   * 打开明文弹窗。`startVisible` 决定明文初始是否可见：
+   * 主动查看时默认遮蔽，需要用户手动复制的兜底场景则直接显示（否则无法选中文本）。
+   */
+  const openPlainKeyDialog = (view: PlainKeyView, startVisible: boolean) => {
+    setPlainKeyView(view)
+    setShowPlainKey(startVisible)
+  }
+
+  /** 弹窗内的复制按钮：失败时展开明文，让用户能手动选中复制 */
+  const handleCopyFromDialog = async (text: string) => {
+    if (await copyTextToClipboard(text)) {
+      toast.success('已复制明文')
+      return
+    }
+    setShowPlainKey(true)
+    toast.error('浏览器拒绝写入剪贴板，请手动选中输入框内容复制')
+  }
+
+  /**
+   * 一键复制明文：列表只有脱敏值，因此先按 id 拉取明文再写剪贴板。
+   * 剪贴板不可用（HTTP 非安全上下文、权限被拒等）时打开明文弹窗兜底，让用户手动复制。
+   */
+  const handleCopyPlaintext = async (item: ClientKeyItem) => {
+    setCopyingKeyId(item.id)
     try {
-      await navigator.clipboard.writeText(text)
-      toast.success('已复制')
-    } catch {
-      toast.error('复制失败')
+      const res = await revealKey.mutateAsync(item.id)
+      if (await copyTextToClipboard(res.key)) {
+        setCopiedKeyId(item.id)
+        toast.success(`已复制 Key "${item.name}" 的明文`)
+        return
+      }
+      toast.error('浏览器拒绝写入剪贴板，已展开明文供手动复制')
+      openPlainKeyDialog({ key: res.key, name: res.name, origin: 'revealed' }, true)
+    } catch (err) {
+      toast.error('获取明文失败：' + extractErrorMessage(err))
+    } finally {
+      setCopyingKeyId(null)
+    }
+  }
+
+  const handleRevealPlaintext = async (item: ClientKeyItem) => {
+    try {
+      const res = await revealKey.mutateAsync(item.id)
+      openPlainKeyDialog({ key: res.key, name: res.name, origin: 'revealed' }, false)
+    } catch (err) {
+      toast.error('获取明文失败：' + extractErrorMessage(err))
     }
   }
 
@@ -235,6 +306,12 @@ export function ClientKeysPage() {
                   <th className="text-right font-medium px-4 py-3">输入</th>
                   <th className="text-right font-medium px-4 py-3">输出</th>
                   <th className="text-left font-medium px-4 py-3">最后使用</th>
+                  <th
+                    className="text-right font-medium px-4 py-3"
+                    title="缓存命中率 = 缓存读 / (输入 + 缓存读)"
+                  >
+                    缓存率
+                  </th>
                   <th className="sticky right-0 z-20 min-w-[9.75rem] border-l border-border/60 bg-card px-4 py-3 text-right font-medium">
                     操作
                   </th>
@@ -262,23 +339,46 @@ export function ClientKeysPage() {
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <button
-                            type="button"
-                            className="rounded px-1 py-0.5 font-mono text-[12px] text-muted-foreground hover:bg-accent/60 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                            title="点击展开 Key 操作"
-                          >
-                            {k.maskedKey}
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="start">
-                          <DropdownMenuItem onSelect={() => handleRotate(k)}>
-                            <RefreshCw className="h-3.5 w-3.5" />
-                            重新生成 Key（旧 Key 立即失效）
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                      <div className="flex items-center gap-1">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              type="button"
+                              className="rounded px-1 py-0.5 font-mono text-[12px] text-muted-foreground hover:bg-accent/60 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                              title="点击展开 Key 操作"
+                            >
+                              {k.maskedKey}
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="start">
+                            <DropdownMenuItem onSelect={() => handleRevealPlaintext(k)}>
+                              <Eye className="h-3.5 w-3.5" />
+                              查看明文
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onSelect={() => handleRotate(k)}>
+                              <RefreshCw className="h-3.5 w-3.5" />
+                              重新生成 Key（旧 Key 立即失效）
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7 shrink-0"
+                          onClick={() => handleCopyPlaintext(k)}
+                          disabled={copyingKeyId === k.id}
+                          title="复制 Key 明文"
+                          aria-label={`复制 Key ${k.name} 的明文`}
+                        >
+                          {copyingKeyId === k.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : copiedKeyId === k.id ? (
+                            <Check className="h-3.5 w-3.5 text-emerald-500" />
+                          ) : (
+                            <Copy className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       {k.group ? (
@@ -299,6 +399,12 @@ export function ClientKeysPage() {
                     <td className="px-4 py-3 text-right tabular-nums">{formatTokens(k.totalOutputTokens)}</td>
                     <td className="px-4 py-3 text-[12px] text-muted-foreground">
                       {formatRelative(k.lastUsedAt)}
+                    </td>
+                    <td
+                      className="px-4 py-3 text-right tabular-nums"
+                      title={`缓存读 ${formatTokens(k.totalCacheReadTokens)} / 输入 ${formatTokens(k.totalInputTokens)}`}
+                    >
+                      {formatCacheRate(k)}
                     </td>
                     <td className="sticky right-0 z-10 min-w-[9.75rem] border-l border-border/60 bg-card px-4 py-3">
                       <div className="flex items-center justify-end gap-1">
@@ -356,7 +462,7 @@ export function ClientKeysPage() {
           <DialogHeader>
             <DialogTitle>新建客户端 Key</DialogTitle>
             <DialogDescription>
-              创建后明文 Key 仅显示一次，请立即复制保存到安全位置。
+              创建后会展示明文 Key，请复制保存到安全位置；之后也可在列表里重新复制。
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleCreate} className="space-y-3 py-2">
@@ -404,25 +510,35 @@ export function ClientKeysPage() {
         </DialogContent>
       </Dialog>
 
-      {/* 创建后明文展示对话框 */}
-      <Dialog open={!!createdKey} onOpenChange={(o) => { if (!o) setCreatedKey(null) }}>
+      {/* 明文展示对话框：新生成的 Key、主动查看明文、以及自动复制失败后的手动复制兜底 */}
+      <Dialog open={!!plainKeyView} onOpenChange={(o) => { if (!o) setPlainKeyView(null) }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <KeyRound className="h-4 w-4 text-emerald-500" />
-              Key 已生成
+              {plainKeyView?.origin === 'created' ? 'Key 已生成' : 'Key 明文'}
             </DialogTitle>
             <DialogDescription>
-              这是 Key "{createdKey?.name}" 的明文。<strong>关闭对话框后将无法再查看</strong>，请立即复制。
+              {plainKeyView?.origin === 'created' ? (
+                <>
+                  这是 Key "{plainKeyView?.name}" 的新明文，旧明文（如有）已立即失效。
+                  之后也可在列表里用「复制明文」或「查看明文」重新取回。
+                </>
+              ) : (
+                <>
+                  这是 Key "{plainKeyView?.name}" 当前生效的明文，请仅在可信环境下展示。
+                </>
+              )}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <div className="relative">
               <Input
                 readOnly
-                type={showCreatedPlain ? 'text' : 'password'}
-                value={createdKey?.key ?? ''}
+                type={showPlainKey ? 'text' : 'password'}
+                value={plainKeyView?.key ?? ''}
                 className="pr-20 font-mono text-[13px]"
+                aria-label="Key 明文"
               />
               <div className="absolute inset-y-0 right-0 flex items-center pr-1">
                 <Button
@@ -430,18 +546,20 @@ export function ClientKeysPage() {
                   size="icon"
                   variant="ghost"
                   className="h-7 w-7"
-                  onClick={() => setShowCreatedPlain((v) => !v)}
-                  title={showCreatedPlain ? '隐藏' : '显示'}
+                  onClick={() => setShowPlainKey((v) => !v)}
+                  title={showPlainKey ? '隐藏' : '显示'}
+                  aria-label={showPlainKey ? '隐藏明文' : '显示明文'}
                 >
-                  {showCreatedPlain ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                  {showPlainKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                 </Button>
                 <Button
                   type="button"
                   size="icon"
                   variant="ghost"
                   className="h-7 w-7"
-                  onClick={() => createdKey && copyText(createdKey.key)}
-                  title="复制"
+                  onClick={() => plainKeyView && handleCopyFromDialog(plainKeyView.key)}
+                  title="复制明文"
+                  aria-label="复制明文"
                 >
                   <Copy className="h-3.5 w-3.5" />
                 </Button>
@@ -452,7 +570,7 @@ export function ClientKeysPage() {
             </p>
           </div>
           <DialogFooter>
-            <Button onClick={() => setCreatedKey(null)}>我已保存好</Button>
+            <Button onClick={() => setPlainKeyView(null)}>关闭</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

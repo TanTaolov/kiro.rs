@@ -50,6 +50,8 @@ interface KamAccount {
   }
   machineId?: string
   status?: string
+  // KAM 1.7+ 新增：凭据添加时间（毫秒时间戳）
+  createdAt?: number
 }
 
 // 把 KAM 的 expiresAt 字段统一规范化为 RFC3339 字符串
@@ -405,6 +407,7 @@ export function KamImportDialog({ open, onOpenChange }: KamImportDialogProps) {
             machineId: account.machineId?.trim() || undefined,
             email: account.email?.trim() || undefined,
             proxyUrl,
+            createdAt: account.createdAt != null ? new Date(account.createdAt).toISOString() : undefined,
           },
         })
       }
